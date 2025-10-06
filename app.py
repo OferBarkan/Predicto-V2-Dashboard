@@ -333,6 +333,17 @@ for col, title in zip(header_cols, headers):
 # ============== ROWS + ACTIONS ==============
 batched_changes = []
 
+# Keep track of used widget keys to avoid duplicates
+seen_widget_ids = set()
+def uniq_key(base: str) -> str:
+    """Return a unique widget key; if base already used, append a short suffix."""
+    k = base
+    if k in seen_widget_ids:
+        from uuid import uuid4
+        k = f"{base}__{uuid4().hex[:6]}"
+    seen_widget_ids.add(k)
+    return k
+
 for i, row in df.iterrows():
     if show_dbf:
         cols = st.columns([3, 0.8, 0.8, 0.8, 1, 1, 1, 1, 1, 1, 0.8, 1])
@@ -344,11 +355,11 @@ for i, row in df.iterrows():
     cols[1].markdown(f"${float(row.get('Spend (USD)', 0)):.2f}")
     cols[2].markdown(f"${float(row.get('Revenue (USD)', 0)):.2f}")
     cols[3].markdown(f"${float(row.get('Profit (USD)', 0)):.2f}")
-    cols[4].markdown(roas_cell(row.get("ROAS", 0)), unsafe_allow_html=True)
+    cols[4].markdown(format_roas(row.get("ROAS", 0)), unsafe_allow_html=True)
 
     if show_dbf:
-        cols[5].markdown(roas_cell(row.get("DBF", None)), unsafe_allow_html=True)
-        cols[6].markdown(roas_cell(row.get("2DBF", None)), unsafe_allow_html=True)
+        cols[5].markdown(format_roas(row.get("DBF", None)), unsafe_allow_html=True)
+        cols[6].markdown(format_roas(row.get("2DBF", None)), unsafe_allow_html=True)
         cols[7].markdown(f"{float(row.get('Current Budget', 0)):.1f}")
         budget_col_i        = 8
         status_col_i        = 9
@@ -361,15 +372,19 @@ for i, row in df.iterrows():
         action_col_i        = 8
         status_badge_col_i  = 9
 
-    # Inputs (New Budget / New Status) — app only
-    # Use a stable widget key based on Ad Set ID (fallback: Channel/Ad Name)
+    # ---------- Widgets (app-only) ----------
+    # Build a stable row UID: prefer Ad Set ID; else fall back to Channel+AdName+Date/Mode
     adset_id = str(row.get("Ad Set ID", "")).strip().replace("'", "")
-    row_uid = adset_id or str(row.get("Custom Channel ID", "")).strip() or str(row.get("Ad Name", "")).strip()
+    ch_id    = str(row.get("Custom Channel ID", "")).strip()
+    ad_name  = str(row.get("Ad Name", "")).strip()
+    the_date = str(row.get("Date", "")).strip()  # may be empty in range mode
+    base_uid = adset_id or f"{ch_id}|{ad_name}|{the_date or view_mode}"
+    base_uid = base_uid.replace(" ", "_")
 
-    # Stable widget keys
-    budget_key = f"budget_{row_uid}"
-    status_key = f"status_{row_uid}"
-    apply_key  = f"apply_{row_uid}"
+    # Stable, de-duplicated widget keys
+    budget_key = uniq_key(f"budget_{base_uid}")
+    status_key = uniq_key(f"status_{base_uid}")
+    apply_key  = uniq_key(f"apply_{base_uid}")
 
     # Default new budget
     try:
@@ -429,6 +444,7 @@ for i, row in df.iterrows():
         f"<div style='background-color:{color}; padding:4px 8px; border-radius:4px; text-align:center; color:black'><b>{display_status}</b></div>",
         unsafe_allow_html=True
     )
+
 
 # ============== TOTALS ROW ==============
 sum_spend  = float(df["Spend (USD)"].sum())
