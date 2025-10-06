@@ -345,6 +345,19 @@ if selected_category != "All":
 if selected_domain != "All":
     df = df[df["Domain"] == selected_domain]
 
+# ===== Sort by Channel ID (lexicographic A→Z) =====
+# ודא שיש עמודת Custom Channel ID; אם חסר – הפק ממחרוזת ה-Ad Name
+if "Custom Channel ID" not in df.columns:
+    df["Custom Channel ID"] = df["Ad Name"].apply(parse_channel_id)
+else:
+    df["Custom Channel ID"] = df["Custom Channel ID"].astype(str).str.strip()
+    need_fill = df["Custom Channel ID"].eq("") | df["Custom Channel ID"].isna()
+    df.loc[need_fill, "Custom Channel ID"] = df.loc[need_fill, "Ad Name"].apply(parse_channel_id)
+
+# מיון לפי Channel ID ואז לפי Ad Name לשבירת שוויון
+df = df.sort_values(by=["Custom Channel ID", "Ad Name"], kind="mergesort").reset_index(drop=True)
+
+
 # ============== ROAS CELL FORMATTER ==============
 def roas_cell(val):
     return format_roas(val)
