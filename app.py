@@ -404,60 +404,75 @@ for i, row in df.iterrows():
         action_col_i        = 8
         status_badge_col_i  = 9
 
-    # Inputs (New Budget / New Status) — באפליקציה בלבד
+ # Inputs (New Budget / New Status) — באפליקציה בלבד
+# השתמש במפתח ייחודי יציב לפי Ad Set ID (fallback: Channel/Ad Name)
+adset_id = str(row.get("Ad Set ID", "")).strip().replace("'", "")
+row_uid = adset_id or str(row.get("Custom Channel ID", "")).strip() or str(row.get("Ad Name", "")).strip()
+
+# מפתחות יציבים ל-widgets
+budget_key = f"budget_{row_uid}"
+status_key = f"status_{row_uid}"
+apply_key  = f"apply_{row_uid}"
+
+# ברירת מחדל לתקציב חדש
+try:
+    default_budget = float(row.get("New Budget", 0)) if pd.notna(row.get("New Budget", 0)) else 0.0
+except Exception:
+    default_budget = 0.0
+
+new_budget = cols[budget_col_i].number_input(
+    " ", value=default_budget, step=1.0,
+    key=budget_key, label_visibility="collapsed"
+)
+
+# סטטוס נוכחי וסטטוס חדש (הבחירה תמיד מחזירה ערך; ה-default מצביע על הסטטוס הנוכחי)
+cur_status = str(row.get("Current Status", "ACTIVE")).upper().strip()
+status_index = 0 if cur_status == "ACTIVE" else 1
+new_status = cols[status_col_i].selectbox(
+    " ", options=["ACTIVE", "PAUSED"], index=status_index,
+    key=status_key, label_visibility="collapsed"
+)
+
+# השוואת שינויים
+current_budget = float(row.get("Current Budget", 0) or 0)
+budget_changed = (new_budget > 0) and (abs(new_budget - current_budget) >= 0.5)
+status_changed = (new_status != cur_status)
+
+# בניית פרמטרי עדכון לפייסבוק
+update_params = {}
+if budget_changed:
+    # פייסבוק רוצה יחידות "minor" (אגורות)
+    update_params["daily_budget"] = int(round(new_budget * 100))
+if status_changed:
+    update_params["status"] = new_status
+
+# הוסף ל-batch רק אם יש משהו לעדכן
+if adset_id and update_params:
+    batched_changes.append({
+        "adset_id": adset_id,
+        "ad_name": row.get("Ad Name", ""),
+        "params": update_params
+    })
+
+# Apply ברמת שורה עם key יציב
+if cols[action_col_i].button("Apply", key=apply_key):
     try:
-        default_budget = float(row.get("New Budget", 0)) if pd.notna(row.get("New Budget", 0)) else 0.0
-    except:
-        default_budget = 0.0
+        if adset_id and update_params:
+            AdSet(adset_id).api_update(params=update_params)
+            st.success(f"✔️ Updated {row.get('Ad Name','')}")
+        else:
+            st.warning(f"⚠️ No valid updates for {row.get('Ad Name','')}")
+    except Exception as e:
+        st.error(f"❌ Failed to update {row.get('Ad Name','')}: {e}")
 
-    new_budget = cols[budget_col_i].number_input(" ", value=default_budget, step=1.0,
-                                                 key=f"budget_{i}", label_visibility="collapsed")
+# Badge של סטטוס לפי הבחירה העדכנית
+display_status = new_status  # כבר משקף את ההגדרה שבחרת כרגע
+color = "#D4EDDA" if display_status == "ACTIVE" else "#5c5b5b" if display_status == "PAUSED" else "#666666"
+cols[status_badge_col_i].markdown(
+    f"<div style='background-color:{color}; padding:4px 8px; border-radius:4px; text-align:center; color:black'><b>{display_status}</b></div>",
+    unsafe_allow_html=True
+)
 
-    cur_status = str(row.get("Current Status", "ACTIVE")).upper().strip()
-    status_index = 0 if cur_status == "ACTIVE" else 1
-    new_status = cols[status_col_i].selectbox(" ", options=["ACTIVE", "PAUSED"], index=status_index,
-                                              key=f"status_{i}", label_visibility="collapsed")
-
-    # Detect changes
-    current_budget = float(row.get("Current Budget", 0) or 0)
-    budget_changed = (new_budget > 0) and (abs(new_budget - current_budget) >= 0.5)
-    status_changed = (new_status != cur_status)
-
-    update_params = {}
-    if budget_changed:
-        # Facebook expects "minor units"
-        update_params["daily_budget"] = int(round(new_budget * 100))
-    if status_changed:
-        update_params["status"] = new_status
-
-    adset_id = str(row.get("Ad Set ID", "")).strip().replace("'", "")
-
-    # Add to batch only if something changed
-    if adset_id and update_params:
-        batched_changes.append({
-            "adset_id": adset_id,
-            "ad_name": row.get("Ad Name", ""),
-            "params": update_params
-        })
-
-    # Row-level Apply
-    if cols[action_col_i].button("Apply", key=f"apply_{i}"):
-        try:
-            if adset_id and update_params:
-                AdSet(adset_id).api_update(params=update_params)
-                st.success(f"✔️ Updated {row.get('Ad Name','')}")
-            else:
-                st.warning(f"⚠️ No valid updates for {row.get('Ad Name','')}")
-        except Exception as e:
-            st.error(f"❌ Failed to update {row.get('Ad Name','')}: {e}")
-
-    # Status badge
-    status = new_status if status_changed else cur_status
-    color = "#D4EDDA" if status == "ACTIVE" else "#5c5b5b" if status == "PAUSED" else "#666666"
-    cols[status_badge_col_i].markdown(
-        f"<div style='background-color:{color}; padding:4px 8px; border-radius:4px; text-align:center; color:black'><b>{status}</b></div>",
-        unsafe_allow_html=True
-    )
 
 # ============== TOTALS ROW ==============
 sum_spend  = float(df["Spend (USD)"].sum())
