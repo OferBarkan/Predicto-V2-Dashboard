@@ -6,6 +6,7 @@ from google.oauth2.service_account import Credentials
 from facebook_business.api import FacebookAdsApi
 from facebook_business.adobjects.adset import AdSet
 import json
+import re
 
 # ============== UI & PAGE CONFIG ==============
 st.set_page_config(page_title="Predicto Ads Dashboard", layout="wide")
@@ -39,59 +40,51 @@ roas_df = read_ws("ROAS")
 man_df  = read_ws("Manual Control")
 
 # ============== HELPERS ==============
-def ymd(d): 
+def ymd(d):
     if isinstance(d, datetime):
         d = d.date()
     return d.strftime("%Y-%m-%d")
 
 def parse_account(ad_name: str) -> str:
-    # Account = הספרה הראשונה לפני המקף הראשון
-    # דוגמא: "3-ch83080_xxx_yyy_cat..." -> "3"
+    """Account is the first digit before the first dash."""
     if not isinstance(ad_name, str):
         return ""
     ad_name = ad_name.strip()
     if len(ad_name) >= 2 and ad_name[0].isdigit() and ad_name[1] == "-":
         return ad_name[0]
-    # fallback עדין: חיפוש ריגקס
-    import re
     m = re.match(r"^\s*(\d)-", ad_name)
     return m.group(1) if m else ""
 
 def parse_channel_id(ad_name: str) -> str:
-    # בין ה-'-' הראשון לבין ה'_' הראשון
-    # "3-ch83080_domain_bm_cat..." -> "ch83080"
+    """Channel ID is the token between first '-' and first '_'."""
     if not isinstance(ad_name, str):
         return ""
-    import re
     m = re.match(r"^\s*\d-([^_]+)", ad_name)
     return m.group(1) if m else ""
 
 def parse_domain(ad_name: str) -> str:
-    # הטוקן אחרי ה'_' הראשון
-    import re
+    """Token after the first underscore."""
     if not isinstance(ad_name, str):
         return "UNKNOWN"
     m = re.match(r"^\s*\d-[^_]+_([^_]+)", ad_name)
     return m.group(1) if m else "UNKNOWN"
 
 def parse_buying_method(ad_name: str) -> str:
-    # הטוקן אחרי ה'_' השני
-    import re
+    """Token after the second underscore."""
     if not isinstance(ad_name, str):
         return "UNKNOWN"
     m = re.match(r"^\s*\d-[^_]+_[^_]+_([^_]+)", ad_name)
     return m.group(1) if m else "UNKNOWN"
 
 def parse_category(ad_name: str) -> str:
-    # הטוקן אחרי ה'_' השלישי
-    import re
+    """Token after the third underscore."""
     if not isinstance(ad_name, str):
         return "UNKNOWN"
     m = re.match(r"^\s*\d-[^_]+_[^_]+_[^_]+_([^_]+)", ad_name)
     return m.group(1) if m else "UNKNOWN"
 
 def clean_roas_column(series: pd.Series) -> pd.Series:
-    # מקבל ROAS שאולי כתוב "120%" וממיר ל-1.2
+    """Convert ROAS like '120%' to 1.2"""
     return (
         series.astype(str)
         .str.replace("%", "", regex=False)
@@ -102,12 +95,18 @@ def clean_roas_column(series: pd.Series) -> pd.Series:
 
 def format_roas(val):
     try:
-        if pd.isna(val): 
+        if pd.isna(val):
             return ""
         val = float(val)
-    except:
+    except Exception:
         return ""
-    color = "#B31B1B" if val < 0.7 else "#FDC1C5" if val < 0.95 else "#FBEEAC" if val < 1.10 else "#93C572" if val < 1.4 else "#019529"
+    color = (
+        "#B31B1B" if val < 0.7 else
+        "#FDC1C5" if val < 0.95 else
+        "#FBEEAC" if val < 1.10 else
+        "#93C572" if val < 1.4 else
+        "#019529"
+    )
     return f"<div style='background-color:{color}; padding:4px 8px; border-radius:4px; text-align:center; color:black'><b>{val:.0%}</b></div>"
 
 # ============== GUARDS ==============
@@ -120,18 +119,18 @@ for col in ["Date", "Ad Name", "Custom Channel ID", "ROAS", "Spend (USD)", "Reve
     if col not in roas_df.columns:
         roas_df[col] = None
 
-# parse numeric
+# Numeric parsing
 roas_df["Spend (USD)"]   = pd.to_numeric(roas_df["Spend (USD)"], errors="coerce").fillna(0.0)
 roas_df["Revenue (USD)"] = pd.to_numeric(roas_df["Revenue (USD)"], errors="coerce").fillna(0.0)
 roas_df["Profit (USD)"]  = pd.to_numeric(roas_df["Profit (USD)"], errors="coerce").fillna(0.0)
 
-# enrich from Ad Name by new naming convention
-roas_df["Account"]         = roas_df["Ad Name"].apply(parse_account)
-roas_df["Domain"]          = roas_df["Ad Name"].apply(parse_domain)
-roas_df["Buying Method"]   = roas_df["Ad Name"].apply(parse_buying_method)
-roas_df["Category"]        = roas_df["Ad Name"].apply(parse_category)
+# Enrich from Ad Name (new naming convention)
+roas_df["Account"]       = roas_df["Ad Name"].apply(parse_account)
+roas_df["Domain"]        = roas_df["Ad Name"].apply(parse_domain)
+roas_df["Buying Method"] = roas_df["Ad Name"].apply(parse_buying_method)
+roas_df["Category"]      = roas_df["Ad Name"].apply(parse_category)
 
-# In case Custom Channel ID is missing in ROAS, derive it (מומלץ שה־ETL ימלא מראש)
+# Ensure Custom Channel ID (fallback derive if missing)
 if "Custom Channel ID" in roas_df.columns:
     missing_ccid = roas_df["Custom Channel ID"].isna() | (roas_df["Custom Channel ID"].astype(str).str.strip() == "")
     roas_df.loc[missing_ccid, "Custom Channel ID"] = roas_df.loc[missing_ccid, "Ad Name"].apply(parse_channel_id)
@@ -157,7 +156,6 @@ if view_mode == "Single day":
         st.stop()
 
     show_dbf = True
-
 else:
     preset = st.selectbox(
         "Quick ranges",
@@ -198,18 +196,11 @@ else:
     show_dbf = False
 
 # ============== CALCULATIONS (PER MODE) ==============
-# Aggregate / attach DBF
 if show_dbf:
-    # DBF ו-2DBF לפי Custom Channel ID (יוניקי)
-    roas_prev = roas_df[roas_df["Date"] == prev_day_str][
-        ["Custom Channel ID", "ROAS"]
-    ].rename(columns={"ROAS": "DBF"})
+    # Attach DBF and 2DBF by Custom Channel ID (unique)
+    roas_prev = roas_df[roas_df["Date"] == prev_day_str][["Custom Channel ID", "ROAS"]].rename(columns={"ROAS": "DBF"})
+    roas_prev2 = roas_df[roas_df["Date"] == prev2_day_str][["Custom Channel ID", "ROAS"]].rename(columns={"ROAS": "2DBF"})
 
-    roas_prev2 = roas_df[roas_df["Date"] == prev2_day_str][
-        ["Custom Channel ID", "ROAS"]
-    ].rename(columns={"ROAS": "2DBF"})
-
-    # ניקוי מזהים למיזוג
     df["Custom Channel ID"] = df["Custom Channel ID"].astype(str).str.strip()
     roas_prev["Custom Channel ID"]  = roas_prev["Custom Channel ID"].astype(str).str.strip()
     roas_prev2["Custom Channel ID"] = roas_prev2["Custom Channel ID"].astype(str).str.strip()
@@ -217,7 +208,7 @@ if show_dbf:
     df = df.merge(roas_prev,  on=["Custom Channel ID"], how="left")
     df = df.merge(roas_prev2, on=["Custom Channel ID"], how="left")
 else:
-    # טווח ימים – סכימה לפי Ad Name + Channel (לשימור גרנולריות של מודעות שונות לאותו ערוץ, אם יהיו)
+    # Aggregate across range
     group_cols = ["Ad Name", "Custom Channel ID", "Account", "Domain", "Buying Method", "Category"]
     df = (
         df.groupby(group_cols, as_index=False)[["Spend (USD)", "Revenue (USD)", "Profit (USD)"]]
@@ -226,7 +217,7 @@ else:
     df["DBF"]  = None
     df["2DBF"] = None
 
-# לחשב ROAS מחודש (למקרה שהעמודה המקורית חסרה/טקסטואלית)
+# Recompute ROAS safely
 df["Spend (USD)"]   = pd.to_numeric(df["Spend (USD)"], errors="coerce").fillna(0.0)
 df["Revenue (USD)"] = pd.to_numeric(df["Revenue (USD)"], errors="coerce").fillna(0.0)
 df["Profit (USD)"]  = df["Revenue (USD)"] - df["Spend (USD)"]
@@ -238,26 +229,21 @@ if show_dbf:
     df["2DBF"] = clean_roas_column(df["2DBF"])
 
 # ============== MERGE MANUAL CONTROL (BUDGET/STATUS) ==============
-# הכנה של עמודות נחוצות מהטאב
-need_cols = ["Ad Name","Ad Set ID","Current Budget (ILS)","Current Status"]
+need_cols = ["Ad Name", "Ad Set ID", "Current Budget (ILS)", "Current Status"]
 for c in need_cols:
     if c not in man_df.columns:
         man_df[c] = None
 
 man_df["Current Budget (ILS)"] = pd.to_numeric(man_df["Current Budget (ILS)"], errors="coerce").fillna(0.0)
 
-df = df.merge(
-    man_df[need_cols],
-    on="Ad Name",
-    how="left"
-)
+df = df.merge(man_df[need_cols], on="Ad Name", how="left")
 
-# עמודות "חדשות" נשלטות באפליקציה (לא מהשיטס)
+# App-only columns
 df["Current Budget"] = df["Current Budget (ILS)"]
 df["New Budget"]     = 0.0
 df["New Status"]     = None
 
-# ============== ENRICH (META FIELDS FROM AD NAME) IF NOT PRESENT ==============
+# ============== ENRICH (META FIELDS) IF MISSING ==============
 for col, func in [
     ("Account", parse_account),
     ("Domain", parse_domain),
@@ -267,7 +253,6 @@ for col, func in [
     if col not in df.columns:
         df[col] = df["Ad Name"].apply(func)
     else:
-        # מלא חוסרים (אם הגיע מה-merge עם סכימה)
         df[col] = df[col].fillna(df["Ad Name"].apply(func))
 
 # ============== SUMMARY (TOP METRICS) ==============
@@ -282,55 +267,30 @@ col4.metric("Total ROAS", f"{total_roas:.0%}")
 
 # ============== FILTERS ROW ==============
 st.subheader("Ad Set Control Panel")
-
-# ארבעה פילטרים צרים + ספייסר
 c_account, c_status, c_cat, c_dom, _spacer = st.columns([1, 1, 1, 1, 4])
 
 with c_account:
     account_options = ["All"] + sorted([a for a in df["Account"].astype(str).unique() if a])
-    selected_account = st.selectbox(
-        "Filter by Account",
-        account_options,
-        index=0,
-        key="filter_account"
-    )
+    selected_account = st.selectbox("Filter by Account", account_options, index=0, key="filter_account")
 
 with c_status:
-    status_filter = st.selectbox(
-        "Filter by Ad Set Status",
-        ["All", "ACTIVE only", "PAUSED only"],
-        index=0,
-        key="filter_status"
-    )
+    status_filter = st.selectbox("Filter by Ad Set Status", ["All", "ACTIVE only", "PAUSED only"], index=0, key="filter_status")
 
-# ↓ מחוץ ל-with כדי להריץ אחרי שה-DF מוכן
-# בנה Status For Filter נכון: New Status אם קיים, אחרת Current Status
+# Build filter status from New Status (if set) else Current Status
 df["Status For Filter"] = df["New Status"]
 df["Status For Filter"] = df["Status For Filter"].where(df["Status For Filter"].notna(), df["Current Status"])
 df["Status For Filter"] = df["Status For Filter"].astype(str).str.upper().str.strip()
-# נטרל ערכי טקסט "NONE" / "NAN" ריקים
 df["Status For Filter"] = df["Status For Filter"].replace({"NONE": "", "NAN": ""})
-
 
 with c_cat:
     category_options = ["All"] + sorted(df["Category"].dropna().astype(str).unique())
-    selected_category = st.selectbox(
-        "Filter by Category",
-        category_options,
-        index=0,
-        key="filter_category"
-    )
+    selected_category = st.selectbox("Filter by Category", category_options, index=0, key="filter_category")
 
 with c_dom:
     domain_options = ["All"] + sorted(df["Domain"].dropna().astype(str).unique())
-    selected_domain = st.selectbox(
-        "Filter by Domain",
-        domain_options,
-        index=0,
-        key="filter_domain"
-    )
+    selected_domain = st.selectbox("Filter by Domain", domain_options, index=0, key="filter_domain")
 
-# החלת הפילטרים
+# Apply filters
 if selected_account != "All":
     df = df[df["Account"].astype(str) == str(selected_account)]
 
@@ -345,8 +305,7 @@ if selected_category != "All":
 if selected_domain != "All":
     df = df[df["Domain"] == selected_domain]
 
-# ===== Sort by Channel ID (lexicographic A→Z) =====
-# ודא שיש עמודת Custom Channel ID; אם חסר – הפק ממחרוזת ה-Ad Name
+# Sort by Custom Channel ID (then Ad Name to break ties)
 if "Custom Channel ID" not in df.columns:
     df["Custom Channel ID"] = df["Ad Name"].apply(parse_channel_id)
 else:
@@ -354,11 +313,9 @@ else:
     need_fill = df["Custom Channel ID"].eq("") | df["Custom Channel ID"].isna()
     df.loc[need_fill, "Custom Channel ID"] = df.loc[need_fill, "Ad Name"].apply(parse_channel_id)
 
-# מיון לפי Channel ID ואז לפי Ad Name לשבירת שוויון
 df = df.sort_values(by=["Custom Channel ID", "Ad Name"], kind="mergesort").reset_index(drop=True)
 
-
-# ============== ROAS CELL FORMATTER ==============
+# ============== ROAS CELL FORMATTER WRAPPER ==============
 def roas_cell(val):
     return format_roas(val)
 
@@ -374,7 +331,7 @@ for col, title in zip(header_cols, headers):
     col.markdown(f"**{title}**")
 
 # ============== ROWS + ACTIONS ==============
-batched_changes = []  # collect only changed rows
+batched_changes = []
 
 for i, row in df.iterrows():
     if show_dbf:
@@ -390,7 +347,7 @@ for i, row in df.iterrows():
     cols[4].markdown(roas_cell(row.get("ROAS", 0)), unsafe_allow_html=True)
 
     if show_dbf:
-        cols[5].markdown(roas_cell(row.get("DBF", None)),  unsafe_allow_html=True)
+        cols[5].markdown(roas_cell(row.get("DBF", None)), unsafe_allow_html=True)
         cols[6].markdown(roas_cell(row.get("2DBF", None)), unsafe_allow_html=True)
         cols[7].markdown(f"{float(row.get('Current Budget', 0)):.1f}")
         budget_col_i        = 8
@@ -404,77 +361,74 @@ for i, row in df.iterrows():
         action_col_i        = 8
         status_badge_col_i  = 9
 
-     # Inputs (New Budget / New Status) — app only
-     # Use a stable widget key based on Ad Set ID (fallback: Channel/Ad Name)
-     adset_id = str(row.get("Ad Set ID", "")).strip().replace("'", "")
-     row_uid = adset_id or str(row.get("Custom Channel ID", "")).strip() or str(row.get("Ad Name", "")).strip()
+    # Inputs (New Budget / New Status) — app only
+    # Use a stable widget key based on Ad Set ID (fallback: Channel/Ad Name)
+    adset_id = str(row.get("Ad Set ID", "")).strip().replace("'", "")
+    row_uid = adset_id or str(row.get("Custom Channel ID", "")).strip() or str(row.get("Ad Name", "")).strip()
 
-     # Stable widget keys
-     budget_key = f"budget_{row_uid}"
-     status_key = f"status_{row_uid}"
-     apply_key  = f"apply_{row_uid}"
+    # Stable widget keys
+    budget_key = f"budget_{row_uid}"
+    status_key = f"status_{row_uid}"
+    apply_key  = f"apply_{row_uid}"
 
-     # Default new budget
-     try:
-         default_budget = float(row.get("New Budget", 0)) if pd.notna(row.get("New Budget", 0)) else 0.0
-     except Exception:
-         default_budget = 0.0
+    # Default new budget
+    try:
+        default_budget = float(row.get("New Budget", 0)) if pd.notna(row.get("New Budget", 0)) else 0.0
+    except Exception:
+        default_budget = 0.0
 
-     new_budget = cols[budget_col_i].number_input(
-         " ", value=default_budget, step=1.0,
-         key=budget_key, label_visibility="collapsed"
-     )
+    new_budget = cols[budget_col_i].number_input(
+        " ", value=default_budget, step=1.0,
+        key=budget_key, label_visibility="collapsed"
+    )
 
-     # Current vs new status (default points to current)
-     cur_status = str(row.get("Current Status", "ACTIVE")).upper().strip()
-     status_index = 0 if cur_status == "ACTIVE" else 1
-     new_status = cols[status_col_i].selectbox(
-         " ", options=["ACTIVE", "PAUSED"], index=status_index,
-         key=status_key, label_visibility="collapsed"
-     )
+    # Current vs new status (default points to current)
+    cur_status = str(row.get("Current Status", "ACTIVE")).upper().strip()
+    status_index = 0 if cur_status == "ACTIVE" else 1
+    new_status = cols[status_col_i].selectbox(
+        " ", options=["ACTIVE", "PAUSED"], index=status_index,
+        key=status_key, label_visibility="collapsed"
+    )
 
-     # Detect changes
-     current_budget = float(row.get("Current Budget", 0) or 0)
-     budget_changed = (new_budget > 0) and (abs(new_budget - current_budget) >= 0.5)
-     status_changed = (new_status != cur_status)
+    # Detect changes
+    current_budget = float(row.get("Current Budget", 0) or 0)
+    budget_changed = (new_budget > 0) and (abs(new_budget - current_budget) >= 0.5)
+    status_changed = (new_status != cur_status)
 
-     # Build update params for Facebook
-     update_params = {}
-     if budget_changed:
-         # Facebook expects minor units (cents)
-         update_params["daily_budget"] = int(round(new_budget * 100))
-     if status_changed:
-         update_params["status"] = new_status
+    # Build update params for Facebook
+    update_params = {}
+    if budget_changed:
+        # Facebook expects minor units (cents)
+        update_params["daily_budget"] = int(round(new_budget * 100))
+    if status_changed:
+        update_params["status"] = new_status
 
-     # Add to batch only if there is something to update
-     if adset_id and update_params:
-         batched_changes.append({
-             "adset_id": adset_id,
-             "ad_name": row.get("Ad Name", ""),
-             "params": update_params
-         })
+    # Add to batch only if there is something to update
+    if adset_id and update_params:
+        batched_changes.append({
+            "adset_id": adset_id,
+            "ad_name": row.get("Ad Name", ""),
+            "params": update_params
+        })
 
-     # Row-level Apply with stable key
-     if cols[action_col_i].button("Apply", key=apply_key):
-         try:
-             if adset_id and update_params:
-                 AdSet(adset_id).api_update(params=update_params)
-                 st.success(f"✔️ Updated {row.get('Ad Name','')}")
-             else:
-                 st.warning(f"⚠️ No valid updates for {row.get('Ad Name','')}")
-         except Exception as e:
-             st.error(f"❌ Failed to update {row.get('Ad Name','')}: {e}")
+    # Row-level Apply with stable key
+    if cols[action_col_i].button("Apply", key=apply_key):
+        try:
+            if adset_id and update_params:
+                AdSet(adset_id).api_update(params=update_params)
+                st.success(f"✔️ Updated {row.get('Ad Name','')}")
+            else:
+                st.warning(f"⚠️ No valid updates for {row.get('Ad Name','')}")
+        except Exception as e:
+            st.error(f"❌ Failed to update {row.get('Ad Name','')}: {e}")
 
-     # Status badge reflects the current selection in the UI
-     display_status = new_status
-     color = "#D4EDDA" if display_status == "ACTIVE" else "#5c5b5b" if display_status == "PAUSED" else "#666666"
-     cols[status_badge_col_i].markdown(
-         f"<div style='background-color:{color}; padding:4px 8px; border-radius:4px; text-align:center; color:black'><b>{display_status}</b></div>",
-         unsafe_allow_html=True
-     )   
-   
-
-
+    # Status badge reflects the current selection in the UI
+    display_status = new_status
+    color = "#D4EDDA" if display_status == "ACTIVE" else "#5c5b5b" if display_status == "PAUSED" else "#666666"
+    cols[status_badge_col_i].markdown(
+        f"<div style='background-color:{color}; padding:4px 8px; border-radius:4px; text-align:center; color:black'><b>{display_status}</b></div>",
+        unsafe_allow_html=True
+    )
 
 # ============== TOTALS ROW ==============
 sum_spend  = float(df["Spend (USD)"].sum())
