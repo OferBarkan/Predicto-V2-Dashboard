@@ -296,17 +296,21 @@ with c_account:
     )
 
 with c_status:
-    # Status For Filter = New Status אם בחרו, אחרת Current Status
-    base_status = df["Current Status"].astype(str).str.upper().str.strip()
-    df["Status For Filter"] = df["New Status"].astype(str).str.upper().str.strip()
-    df["Status For Filter"] = df["Status For Filter"].replace({"": None, "NAN": None}).fillna(base_status)
-
     status_filter = st.selectbox(
         "Filter by Ad Set Status",
         ["All", "ACTIVE only", "PAUSED only"],
         index=0,
         key="filter_status"
     )
+
+# ↓ מחוץ ל-with כדי להריץ אחרי שה-DF מוכן
+# בנה Status For Filter נכון: New Status אם קיים, אחרת Current Status
+df["Status For Filter"] = df["New Status"]
+df["Status For Filter"] = df["Status For Filter"].where(df["Status For Filter"].notna(), df["Current Status"])
+df["Status For Filter"] = df["Status For Filter"].astype(str).str.upper().str.strip()
+# נטרל ערכי טקסט "NONE" / "NAN" ריקים
+df["Status For Filter"] = df["Status For Filter"].replace({"NONE": "", "NAN": ""})
+
 
 with c_cat:
     category_options = ["All"] + sorted(df["Category"].dropna().astype(str).unique())
