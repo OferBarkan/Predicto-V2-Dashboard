@@ -492,3 +492,23 @@ with st.container():
                 st.success(f"✔️ Applied {successes} update(s)")
             if failures:
                 st.warning(f"⚠️ {failures} update(s) failed")
+
+# --- Rules tab ---
+st.markdown("---")
+rules_tab, = st.tabs(["Rules"])  # טאב חדש
+with rules_tab:
+    st.subheader("Rules (from Google Sheets)")
+
+    SPREADSHEET_ID = "1wRDzNImkWSDmS5uZAgaECFO7X8HO2XO2f69FqQ1Qu7k"
+    SHEET_NAME = "Rules"
+
+    try:
+        sheet_rules = client.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+        rules_df = pd.DataFrame(sheet_rules.get_all_records())
+        if rules_df.empty:
+            st.warning("The 'Rules' sheet is empty.")
+        else:
+            st.success("Loaded 'Rules' ✅")
+            st.dataframe(rules_df, use_container_width=True, hide_index=True)
+    except Exception as e:
+        st.error(f"Failed to load 'Rules': {e}")
