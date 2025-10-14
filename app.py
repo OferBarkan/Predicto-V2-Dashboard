@@ -85,15 +85,16 @@ def parse_category(ad_name: str) -> str:
 
 def parse_locale(ad_name: str) -> str:
     """
-    Locale הוא(ו) הטוקן/ים אחרי ה-Category: בדרך כלל קוד מדינה דו-אותי (us/gb/de)
+    Locale הוא(ו) הטוקן/ים אחרי ה-Category:
+    בדרך כלל קוד מדינה דו-אותי (us/gb/de)
     ואופציונלית שפת יעד דו-אותית (en/es וכו') — למשל: 'gb_en'.
-    נתמך גם מקרים כמו 'us__88' -> יחזיר 'us' בלבד.
+    תומך גם במבנים עם מזהים נוספים, למשל 'us_en_104' -> 'us_en'.
     """
     if not isinstance(ad_name, str):
         return "UNKNOWN"
 
-    # נתפוס את שלושת הטוקנים הראשונים אחרי המקף הראשון: <domain>_<buying>_<category> ואז את הזנב
-    m = re.match(r"^\s*\d-[^_]+_[^_]+_[^_]+(?:_(.*))?$", ad_name.strip())
+    # נתפוס את כל מה שאחרי ה־category
+    m = re.match(r"^\s*\d-[^_]+_[^_]+_[^_]+_(.*)$", ad_name.strip())
     tail = (m.group(1) if m else "") or ""
     if not tail:
         return "UNKNOWN"
@@ -105,13 +106,15 @@ def parse_locale(ad_name: str) -> str:
     def is_code(x: str) -> bool:
         return bool(re.fullmatch(r"[A-Za-z]{2}", x or ""))
 
-    country = toks[0].lower()
-    lang    = toks[1].lower() if len(toks) > 1 else ""
+    # חפש קוד מדינה ראשון
+    for i in range(len(toks)):
+        if is_code(toks[i]):
+            country = toks[i].lower()
+            lang = toks[i + 1].lower() if i + 1 < len(toks) and is_code(toks[i + 1]) else ""
+            return f"{country}_{lang}" if lang else country
 
-    if not is_code(country):
-        return "UNKNOWN"
+    return "UNKNOWN"
 
-    return f"{country}_{lang}" if is_code(lang) else country
 
 
 def clean_roas_column(series: pd.Series) -> pd.Series:
