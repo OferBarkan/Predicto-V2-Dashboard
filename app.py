@@ -83,6 +83,37 @@ def parse_category(ad_name: str) -> str:
     m = re.match(r"^\s*\d-[^_]+_[^_]+_[^_]+_([^_]+)", ad_name)
     return m.group(1) if m else "UNKNOWN"
 
+def parse_locale(ad_name: str) -> str:
+    """
+    Locale הוא(ו) הטוקן/ים אחרי ה-Category: בדרך כלל קוד מדינה דו-אותי (us/gb/de)
+    ואופציונלית שפת יעד דו-אותית (en/es וכו') — למשל: 'gb_en'.
+    נתמך גם מקרים כמו 'us__88' -> יחזיר 'us' בלבד.
+    """
+    if not isinstance(ad_name, str):
+        return "UNKNOWN"
+
+    # נתפוס את שלושת הטוקנים הראשונים אחרי המקף הראשון: <domain>_<buying>_<category> ואז את הזנב
+    m = re.match(r"^\s*\d-[^_]+_[^_]+_[^_]+(?:_(.*))?$", ad_name.strip())
+    tail = (m.group(1) if m else "") or ""
+    if not tail:
+        return "UNKNOWN"
+
+    toks = tail.split("_")
+    if not toks:
+        return "UNKNOWN"
+
+    def is_code(x: str) -> bool:
+        return bool(re.fullmatch(r"[A-Za-z]{2}", x or ""))
+
+    country = toks[0].lower()
+    lang    = toks[1].lower() if len(toks) > 1 else ""
+
+    if not is_code(country):
+        return "UNKNOWN"
+
+    return f"{country}_{lang}" if is_code(lang) else country
+
+
 def clean_roas_column(series: pd.Series) -> pd.Series:
     """Convert ROAS like '120%' to 1.2"""
     return (
@@ -129,6 +160,8 @@ roas_df["Account"]       = roas_df["Ad Name"].apply(parse_account)
 roas_df["Domain"]        = roas_df["Ad Name"].apply(parse_domain)
 roas_df["Buying Method"] = roas_df["Ad Name"].apply(parse_buying_method)
 roas_df["Category"]      = roas_df["Ad Name"].apply(parse_category)
+roas_df["Locale"] = roas_df["Ad Name"].apply(parse_locale)
+
 
 # Ensure Custom Channel ID (fallback derive if missing)
 if "Custom Channel ID" in roas_df.columns:
@@ -209,7 +242,7 @@ if show_dbf:
     df = df.merge(roas_prev2, on=["Custom Channel ID"], how="left")
 else:
     # Aggregate across range
-    group_cols = ["Ad Name", "Custom Channel ID", "Account", "Domain", "Buying Method", "Category"]
+    group_cols = ["Ad Name", "Custom Channel ID", "Account", "Domain", "Buying Method", "Category", "Locale"]
     df = (
         df.groupby(group_cols, as_index=False)[["Spend (USD)", "Revenue (USD)", "Profit (USD)"]]
           .sum()
@@ -267,7 +300,7 @@ col4.metric("Total ROAS", f"{total_roas:.0%}")
 
 # ============== FILTERS ROW ==============
 st.subheader("Ad Set Control Panel")
-c_account, c_status, c_cat, c_dom, _spacer = st.columns([1, 1, 1, 1, 4])
+c_account, c_status, c_cat, c_dom, c_loc, _spacer = st.columns([1, 1, 1, 1, 1, 3])
 
 with c_account:
     account_options = ["All"] + sorted([a for a in df["Account"].astype(str).unique() if a])
@@ -290,6 +323,11 @@ with c_dom:
     domain_options = ["All"] + sorted(df["Domain"].dropna().astype(str).unique())
     selected_domain = st.selectbox("Filter by Domain", domain_options, index=0, key="filter_domain")
 
+with c_loc:
+    locale_options = ["All"] + sorted(df["Locale"].dropna().astype(str).unique())
+    selected_locale = st.selectbox("Filter by Locale", locale_options, index=0, key="filter_locale")
+
+
 # Apply filters
 if selected_account != "All":
     df = df[df["Account"].astype(str) == str(selected_account)]
@@ -304,6 +342,10 @@ if selected_category != "All":
 
 if selected_domain != "All":
     df = df[df["Domain"] == selected_domain]
+
+if selected_locale != "All":
+    df = df[df["Locale"] == selected_locale]
+
 
 # Sort by Custom Channel ID (then Ad Name to break ties)
 if "Custom Channel ID" not in df.columns:
